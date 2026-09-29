@@ -53,10 +53,15 @@ def encode_pixels(vae, pixel_values: torch.Tensor) -> torch.Tensor:
 
 
 @torch.no_grad()
-def cache_vae_params(vae, dataset: CaptionedImageDataset) -> torch.Tensor:
-    out = [encode_pixels(vae, dataset.get_pixels(i).unsqueeze(0)).cpu() for i in tqdm(
-        range(dataset.num_unique), desc="Caching latents")]
-    return torch.cat(out)
+def cache_vae_params(vae, dataset: CaptionedImageDataset) -> list[torch.Tensor]:
+    """One [1, 2C, h, w] tensor per image (a list, because every image can have a different size)."""
+    out = []
+    for i in tqdm(range(dataset.num_unique), desc="Caching latents"):
+        pixels = dataset.get_pixels(i)
+        logger.info("[%02d/%d] %s -> %dx%d", i + 1, dataset.num_unique, dataset.samples[i][0].name,
+                    pixels.shape[2], pixels.shape[1])
+        out.append(encode_pixels(vae, pixels.unsqueeze(0)).cpu())
+    return out
 
 
 # ----------------------------------------------------------------------------- loss
@@ -183,8 +188,7 @@ def train(cfg, force: bool = False) -> None:
     # ---- data -------------------------------------------------------------------------
     samples = find_samples(cfg.data.dir, cfg.data.image_exts, cfg.data.caption_ext,
                            cfg.data.trigger_word, cfg.data.require_trigger_word)
-    dataset = CaptionedImageDataset(samples, cfg.data.resolution, cfg.data.center_crop,
-                                    cfg.data.random_flip, cfg.data.repeats)
+    dataset = CaptionedImageDataset(samples, cfg.data.resolution, cfg.data.random_flip, cfg.data.repeats)
     logger.info("Dataset: %d images x %d repeats", dataset.num_unique, cfg.data.repeats)
     if accelerator.is_main_process:
         save_run_metadata(cfg, run_dir, len(samples), dataset_fingerprint(samples))
@@ -247,7 +251,7 @@ def train(cfg, force: bool = False) -> None:
             with accelerator.accumulate(transformer):
                 idx = batch["index"].cpu()
                 if latent_cache is not None:
-                    params = latent_cache[idx].to(device, dtype)
+                    params = torch.cat([latent_cache[i] for i in idx.tolist()]).to(device, dtype)
                 else:
                     params = encode_pixels(vae, batch["pixel_values"])
                 latents = sample_latents(params, vae)

@@ -59,6 +59,7 @@ def generate_samples(pipeline: FluxPipeline, vp: ValidationPrompts, val_cfg, out
     for i, (prompt, kind) in enumerate(zip(vp.prompts, vp.kinds)):
         for j in range(val_cfg.images_per_prompt):
             seed = val_cfg.seed + j
+            height, width = val_cfg.sizes[i % len(val_cfg.sizes)]
             generator = torch.Generator("cpu").manual_seed(seed)
             ctx = (torch.autocast(device.type, dtype=autocast_dtype)
                    if autocast_dtype is not None else torch.autocast(device.type, enabled=False))
@@ -66,12 +67,12 @@ def generate_samples(pipeline: FluxPipeline, vp: ValidationPrompts, val_cfg, out
                 image = pipeline(
                     prompt_embeds=vp.prompt_embeds[i:i + 1].to(device),
                     pooled_prompt_embeds=vp.pooled_embeds[i:i + 1].to(device),
-                    height=val_cfg.height, width=val_cfg.width,
+                    height=height, width=width,
                     num_inference_steps=val_cfg.num_inference_steps,
                     guidance_scale=val_cfg.guidance_scale,
                     generator=generator,
                 ).images[0]
-            path = out_dir / f"{i:02d}_{kind}_seed{seed}.png"
+            path = out_dir / f"{i:02d}_{kind}_{width}x{height}_seed{seed}.png"
             image.save(path)
             results.append({"path": str(path), "prompt": prompt, "kind": kind, "seed": seed, "image": image})
 
@@ -85,7 +86,10 @@ def _save_grid(images: list[Image.Image], path: Path, cols: int = 3, thumb: int 
     rows = (len(images) + cols - 1) // cols
     grid = Image.new("RGB", (cols * thumb, rows * thumb), "white")
     for k, im in enumerate(images):
-        grid.paste(im.resize((thumb, thumb)), ((k % cols) * thumb, (k // cols) * thumb))
+        im = im.copy()
+        im.thumbnail((thumb, thumb))  # keeps aspect ratio
+        x, y = (k % cols) * thumb, (k // cols) * thumb
+        grid.paste(im, (x + (thumb - im.width) // 2, y + (thumb - im.height) // 2))
     grid.save(path, quality=90)
 
 

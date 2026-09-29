@@ -10,15 +10,14 @@ model:
 data:
   dir: data
   trigger_word: sltnhsn
-  resolution: 1024
-  center_crop: true
+  resolution: 1024          # pixel budget (1024^2); no square crop, aspect ratio is preserved
   random_flip: false
   repeats: 1
   cache_latents: true
 
 training:
-  batch_size: 1
-  gradient_accumulation_steps: 1
+  batch_size: 1             # must stay 1 (variable image sizes); raise gradient_accumulation_steps instead
+  gradient_accumulation_steps: 4
   max_train_steps: 1000
   learning_rate: 0.0001
   lr_scheduler: constant
@@ -55,6 +54,7 @@ validation:
   seed: 1234
   num_inference_steps: 28
   guidance_scale: 3.5
+  sizes: [[768, 1024], [1024, 768]]   # [height, width], cycled over prompts: landscape, portrait, ...
   prompts:
     - "sltnhsn, a photograph of the Mosque-Madrasa of Sultan Hassan in Cairo, monumental stone facade, midday light"
     - "sltnhsn, the towering minaret and the main portal in golden hour light"

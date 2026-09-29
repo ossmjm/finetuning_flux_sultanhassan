@@ -126,6 +126,9 @@ so expect close, not identical, curves.
   with `data.cache_latents: true` the VAE is also used only once for training (kept afterwards for validation decoding).
 * Only the LoRA weights are trained and saved; the trainable LoRA parameters are kept in fp32 while the base model is bf16.
 * `flow_matching.weighting_scheme` defaults to the official `none` (uniform timesteps); `logit_normal` is a common alternative to test.
-* Images are resized (short side) and center-cropped to a square. If your photos are wide and the crop cuts off the
-  minaret or portal, pre-crop them or set `center_crop: false` + `cache_latents: false` for random crops.
+* **No square crop.** Each image keeps its own aspect ratio: images above the `data.resolution`² pixel budget are downscaled,
+  smaller ones are never upscaled, and sides are snapped down to multiples of 16 (FLUX needs this; at most 15 px trimmed,
+  nothing at all if your files already comply). Because tensors differ in size, `training.batch_size` must be 1 -
+  use `gradient_accumulation_steps` for a larger effective batch. Validation samples are generated at
+  `validation.sizes` (landscape + portrait) to match the data.
 * Not included on purpose: resume-from-checkpoint (optimizer state is not saved), text-encoder training, prior preservation.

@@ -36,12 +36,12 @@ class DataConfig:
     require_trigger_word: bool = True   # only *checks* captions, never edits them
     image_exts: list[str] = field(default_factory=lambda: [".jpg", ".jpeg", ".png", ".webp"])
     caption_ext: str = ".txt"
-    resolution: int = 1024
-    center_crop: bool = True
-    random_flip: bool = False           # off by default: architecture is not mirror-symmetric
+    resolution: int = 1024              # pixel BUDGET (resolution^2): larger images are downscaled, smaller never upscaled
+    random_flip: bool = False           # off by default: the building is not mirror-symmetric
     repeats: int = 1
     num_workers: int = 2
     cache_latents: bool = True          # VAE runs once up front, then is only used for validation
+    # Aspect ratio is always preserved (no square crop); sides are snapped to multiples of 16.
     # Note: text embeddings are always precomputed once (captions are fixed, text encoders frozen).
 
 
@@ -99,8 +99,9 @@ class ValidationConfig:
     seed: int = 1234
     num_inference_steps: int = 28
     guidance_scale: float = 3.5
-    height: int = 1024
-    width: int = 1024
+    # [height, width] pairs, cycled over prompts (trigger prompts first, then control prompts).
+    # Mix portrait and landscape because the training data does.
+    sizes: list[list[int]] = field(default_factory=lambda: [[768, 1024], [1024, 768]])
     images_per_prompt: int = 1
     prompts: list[str] = field(default_factory=lambda: [
         "sltnhsn, a photograph of the Mosque-Madrasa of Sultan Hassan in Cairo, monumental stone facade, midday light",
@@ -224,9 +225,14 @@ def load_config(path: str | Path, overrides: list[str] | None = None) -> Config:
 
 def validate(cfg: Config) -> None:
     d, t, l, v = cfg.data, cfg.training, cfg.lora, cfg.validation
-    if d.cache_latents and (d.random_flip or not d.center_crop):
-        raise ValueError("data.cache_latents=true needs deterministic preprocessing "
-                         "(center_crop=true, random_flip=false). Disable cache_latents to use augmentation.")
+    if d.cache_latents and d.random_flip:
+        raise ValueError("data.cache_latents=true needs deterministic preprocessing (random_flip=false). "
+                         "Disable cache_latents to use flip augmentation.")
+    if t.batch_size != 1:
+        raise ValueError("training.batch_size must be 1: images keep their own aspect ratio, so they cannot be "
+                         "stacked into one tensor. Use training.gradient_accumulation_steps for a larger effective batch.")
+    if not v.sizes or any(len(x) != 2 or x[0] % 16 or x[1] % 16 for x in v.sizes):
+        raise ValueError("validation.sizes must be a list of [height, width] pairs that are multiples of 16")
     if l.rank <= 0 or l.alpha <= 0:
         raise ValueError("lora.rank and lora.alpha must be > 0")
     if not l.target_modules:

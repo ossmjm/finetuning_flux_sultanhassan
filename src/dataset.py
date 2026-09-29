@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import math
+import random
 from pathlib import Path
 
 import torch
 from PIL import Image
-from PIL.ImageOps import exif_transpose
+from PIL.ImageOps import exif_transpose, mirror
 from torch.utils.data import Dataset
 from torchvision import transforms
 
@@ -78,25 +80,38 @@ def dataset_fingerprint(samples: list[tuple[Path, str]]) -> str:
     return h.hexdigest()
 
 
+MULTIPLE = 16  # FLUX: VAE downsamples 8x, transformer patchifies 2x2 -> H and W must be multiples of 16
+
+
+def plan_size(w: int, h: int, max_pixels: int, multiple: int = MULTIPLE) -> tuple[tuple[int, int], tuple[int, int]]:
+    """Aspect-ratio-preserving size plan, no square crop.
+
+    1. Images larger than `max_pixels` are downscaled (never upscaled - interpolated pixels add no detail).
+    2. Whatever is left over after rounding DOWN to a multiple of 16 is trimmed evenly from the edges
+       (at most 15 px in total per axis; zero for images whose sides are already multiples of 16).
+    Returns ((resize_w, resize_h), (final_w, final_h)).
+    """
+    scale = min(1.0, math.sqrt(max_pixels / (w * h)))
+    rw, rh = (round(w * scale), round(h * scale)) if scale < 1.0 else (w, h)
+    fw, fh = max(multiple, rw // multiple * multiple), max(multiple, rh // multiple * multiple)
+    return (rw, rh), (fw, fh)
+
+
 class CaptionedImageDataset(Dataset):
     """Yields {"index", "pixel_values"}; `index` points into `self.captions` / cached embeddings.
 
-    Images are decoded lazily, so preprocessing (crop/flip) is re-sampled every epoch when
-    augmentation is enabled (the official script fixes the crop once at start-up).
+    Every image keeps its own aspect ratio (variable-size tensors), so use batch_size=1 and
+    gradient accumulation. Images are decoded lazily, so flip augmentation is re-sampled every epoch.
     """
 
-    def __init__(self, samples, resolution, center_crop=True, random_flip=False, repeats=1):
+    def __init__(self, samples, resolution, random_flip=False, repeats=1):
         self.samples = samples
         self.captions = [c for _, c in samples]
+        self.max_pixels = resolution * resolution
+        self.random_flip = random_flip
         self.repeats = repeats
         self.skip_pixels = False  # set True once latents are cached
-        self.transform = transforms.Compose([
-            transforms.Resize(resolution, interpolation=transforms.InterpolationMode.BILINEAR),
-            transforms.CenterCrop(resolution) if center_crop else transforms.RandomCrop(resolution),
-            transforms.RandomHorizontalFlip(p=0.5 if random_flip else 0.0),
-            transforms.ToTensor(),
-            transforms.Normalize([0.5], [0.5]),
-        ])
+        self.to_tensor = transforms.Compose([transforms.ToTensor(), transforms.Normalize([0.5], [0.5])])
 
     @property
     def num_unique(self) -> int:
@@ -106,8 +121,16 @@ class CaptionedImageDataset(Dataset):
         return len(self.samples) * self.repeats
 
     def get_pixels(self, unique_index: int) -> torch.Tensor:
-        image = exif_transpose(Image.open(self.samples[unique_index][0]))
-        return self.transform(image.convert("RGB"))
+        image = exif_transpose(Image.open(self.samples[unique_index][0])).convert("RGB")
+        (rw, rh), (fw, fh) = plan_size(*image.size, self.max_pixels)
+        if (rw, rh) != image.size:
+            image = image.resize((rw, rh), Image.LANCZOS)
+        if (fw, fh) != (rw, rh):
+            left, top = (rw - fw) // 2, (rh - fh) // 2
+            image = image.crop((left, top, left + fw, top + fh))
+        if self.random_flip and random.random() < 0.5:
+            image = mirror(image)
+        return self.to_tensor(image)
 
     def __getitem__(self, i: int) -> dict:
         idx = i % self.num_unique
