@@ -1,0 +1,17 @@
+# Python >= 3.10. Install a CUDA build of torch first (https://pytorch.org/get-started/locally/).
+# Each run also writes an exact `requirements.lock.txt` next to its outputs.
+torch>=2.3
+torchvision
+diffusers>=0.40
+transformers>=4.44
+accelerate>=0.33
+peft>=0.14
+safetensors
+sentencepiece        # T5 tokenizer
+protobuf
+pillow
+pyyaml
+tqdm
+wandb
+huggingface_hub
+# bitsandbytes       # only for training.optimizer: adamw8bit

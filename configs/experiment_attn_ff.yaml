@@ -1,0 +1,20 @@
+# Same as baseline but LoRA also covers the feed-forward layers (the official script's default set).
+base: baseline.yaml
+run:
+  name: experiment_attn_ff
+lora:
+  target_modules:
+    - attn.to_k
+    - attn.to_q
+    - attn.to_v
+    - attn.to_out.0
+    - attn.add_k_proj
+    - attn.add_q_proj
+    - attn.add_v_proj
+    - attn.to_add_out
+    - ff.net.0.proj
+    - ff.net.2
+    - ff_context.net.0.proj
+    - ff_context.net.2
+logging:
+  tags: [target-modules]

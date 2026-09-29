@@ -1,0 +1,70 @@
+# Baseline: attention-only LoRA, rank 16, 1000 steps.
+# Every experiment is "base: baseline.yaml" + the few keys that differ.
+run:
+  name: baseline
+
+model:
+  name: black-forest-labs/FLUX.1-dev
+  revision: null            # set to a commit hash to pin the exact base weights
+
+data:
+  dir: data
+  trigger_word: sltnhsn
+  resolution: 1024
+  center_crop: true
+  random_flip: false
+  repeats: 1
+  cache_latents: true
+
+training:
+  batch_size: 1
+  gradient_accumulation_steps: 1
+  max_train_steps: 1000
+  learning_rate: 0.0001
+  lr_scheduler: constant
+  lr_warmup_steps: 0
+  optimizer: adamw          # adamw | adamw8bit
+  mixed_precision: bf16
+  gradient_checkpointing: true
+  seed: 42
+
+flow_matching:
+  weighting_scheme: none    # official default; try logit_normal as an experiment
+  guidance_scale: 3.5
+
+lora:
+  rank: 16
+  alpha: 16
+  dropout: 0.0
+  target_modules:           # attention projections of the double- and single-stream blocks
+    - attn.to_k
+    - attn.to_q
+    - attn.to_v
+    - attn.to_out.0
+    - attn.add_k_proj
+    - attn.add_q_proj
+    - attn.add_v_proj
+    - attn.to_add_out
+
+checkpointing:
+  every_n_steps: 250
+
+validation:
+  every_n_steps: 250
+  at_start: true
+  seed: 1234
+  num_inference_steps: 28
+  guidance_scale: 3.5
+  prompts:
+    - "sltnhsn, a photograph of the Mosque-Madrasa of Sultan Hassan in Cairo, monumental stone facade, midday light"
+    - "sltnhsn, the towering minaret and the main portal in golden hour light"
+    - "sltnhsn, a wide view of the mosque rising above the surrounding Cairo streets at sunset"
+    - "sltnhsn, a detailed close-up of the carved stonework and muqarnas ornamentation"
+  control_prompts:          # no trigger word: watch these for drift / forgetting
+    - "a photograph of a historic mosque with a tall minaret in Istanbul"
+    - "a red vintage car parked on a quiet European street"
+
+logging:
+  report_to: wandb          # wandb | none
+  project_name: flux-sultan-hassan
+  tags: [baseline]

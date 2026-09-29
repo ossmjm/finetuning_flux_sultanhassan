@@ -1,0 +1,8 @@
+base: baseline.yaml
+run:
+  name: experiment_rank8
+lora:
+  rank: 8
+  alpha: 8
+logging:
+  tags: [rank-sweep]
