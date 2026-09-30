@@ -55,12 +55,23 @@ def load_vae(cfg, device, dtype) -> AutoencoderKL:
 
 
 def load_transformer(cfg, device, dtype) -> FluxTransformer2DModel:
+    """Load the FLUX transformer. With model.quantization="nf4" the frozen base weights are stored in
+    4-bit (QLoRA): ~7 GB instead of ~24 GB, so it fits on 16 GB GPUs. LoRA weights stay in higher precision."""
+    kwargs = {}
+    if cfg.model.quantization == "nf4":
+        from diffusers import BitsAndBytesConfig  # needs `pip install bitsandbytes`
+        kwargs = dict(
+            quantization_config=BitsAndBytesConfig(
+                load_in_4bit=True, bnb_4bit_quant_type="nf4",
+                bnb_4bit_use_double_quant=True, bnb_4bit_compute_dtype=dtype),
+            device_map={"": device},  # quantize straight onto the GPU, never materialise 24 GB
+        )
     transformer = FluxTransformer2DModel.from_pretrained(
         cfg.model.name, subfolder="transformer", revision=cfg.model.revision,
-        variant=cfg.model.variant, torch_dtype=dtype,
+        variant=cfg.model.variant, torch_dtype=dtype, **kwargs,
     )
     transformer.requires_grad_(False)  # base model stays frozen; only LoRA params get grads
-    return transformer.to(device)
+    return transformer if kwargs else transformer.to(device)
 
 
 def add_lora(transformer: FluxTransformer2DModel, lora_cfg) -> list[torch.nn.Parameter]:

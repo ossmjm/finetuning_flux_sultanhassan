@@ -27,7 +27,8 @@ outputs/<run.name>/        created per run (see below)
 
 ```bash
 python -m venv .venv && source .venv/bin/activate     # Python >= 3.10
-# install a CUDA build of torch first, then:
+# install a CUDA build of torch >= 2.5 with matching torchvision first, e.g. CUDA 12.4:
+pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
 pip install -r requirements.txt
 huggingface-cli login      # FLUX.1-dev is gated: accept the license on the model page first
 wandb login                # or set logging.report_to: none
@@ -37,8 +38,10 @@ Put your dataset in `data/` (`image_1.jpg` + `image_1.txt`, ...). On start-up th
 every image has a caption, no caption is empty, and every caption contains `sltnhsn`
 (it only *checks* — captions are never edited).
 
-**Hardware:** the 12B transformer alone is ~24 GB in bf16, so plan for a 40 GB+ GPU (A100/A6000/H100) for
-1024 px training. Smaller cards would need quantisation or offloading, which this project does not implement.
+**Hardware:** the 12B transformer alone is ~24 GB in bf16, so the default configs need a 40 GB+ GPU
+(A100/A6000/H100). On a 16 GB card (e.g. T4) use `configs/low_vram_nf4.yaml`, which stores the frozen base model
+in 4-bit (`model.quantization: nf4`, needs `bitsandbytes`) and trains LoRA on top (QLoRA). Expect it to be much slower,
+and run with `PYTORCH_ALLOC_CONF=expandable_segments:True`. T4s have no native bf16, so bf16 is emulated there.
 
 ## Run an experiment
 
@@ -105,7 +108,7 @@ Re-generate at any time: `python scripts/generate_validation.py --config <cfg> -
 
 ## Tracked in W&B
 
-`train/loss`, `train/lr`, `train/grad_norm`, step, and the whole resolved config (rank, alpha, lr, batch size,
+`train/loss`, `train/loss_ema` (smoothed - read this one), `train/sigma_mean`, `train/lr`, `train/grad_norm`, step, and the whole resolved config (rank, alpha, lr, batch size,
 resolution, seed, target modules, ...). Run names encode the essentials: `<name>_r16_a16_lr0.0001_bs1_s42`.
 Validation images are logged per step.
 

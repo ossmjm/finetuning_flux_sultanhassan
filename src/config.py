@@ -27,6 +27,7 @@ class ModelConfig:
     revision: str | None = None      # pin a HF commit hash for strict reproducibility
     variant: str | None = None
     max_sequence_length: int = 512   # T5 token length (512 for dev)
+    quantization: str = "none"       # none | nf4  (nf4 = 4-bit base weights, QLoRA; for GPUs < 40 GB)
 
 
 @dataclass
@@ -237,6 +238,8 @@ def validate(cfg: Config) -> None:
         raise ValueError("lora.rank and lora.alpha must be > 0")
     if not l.target_modules:
         raise ValueError("lora.target_modules must not be empty")
+    if cfg.model.quantization not in {"none", "nf4"}:
+        raise ValueError("model.quantization must be none or nf4")
     if t.mixed_precision not in {"bf16", "fp16", "no"}:
         raise ValueError("training.mixed_precision must be bf16, fp16 or no")
     if t.optimizer not in {"adamw", "adamw8bit"}:

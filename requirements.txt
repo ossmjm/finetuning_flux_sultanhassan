@@ -1,7 +1,10 @@
-# Python >= 3.10. Install a CUDA build of torch first (https://pytorch.org/get-started/locally/).
+# Python >= 3.10. Install a CUDA build of torch + matching torchvision FIRST (https://pytorch.org/get-started/locally/),
+# e.g. for CUDA 12.4:  pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+# If the base image ships torchaudio, upgrade it together with torch (or `pip uninstall torchaudio`): a mismatched one breaks transformers imports.
+# Recent transformers/peft/diffusers need torch >= 2.5; older torch makes transformers disable PyTorch and imports fail.
 # Each run also writes an exact `requirements.lock.txt` next to its outputs.
-torch>=2.3
-torchvision
+torch>=2.5
+torchvision>=0.20
 diffusers>=0.40
 transformers>=4.44
 accelerate>=0.33
@@ -14,4 +17,4 @@ pyyaml
 tqdm
 wandb
 huggingface_hub
-# bitsandbytes       # only for training.optimizer: adamw8bit
+bitsandbytes>=0.43.2   # needed for model.quantization: nf4 (and optimizer: adamw8bit)

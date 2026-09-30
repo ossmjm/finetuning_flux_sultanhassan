@@ -1,0 +1,30 @@
+# For 16 GB GPUs (e.g. T4): 4-bit (NF4) frozen base model + LoRA, and a lighter validation schedule.
+# Run with:  PYTORCH_ALLOC_CONF=expandable_segments:True python scripts/train.py --config configs/low_vram_nf4.yaml
+base: baseline.yaml
+run:
+  name: low_vram_nf4
+
+model:
+  quantization: nf4
+
+# data:
+#   resolution: 768       # fallback if you still hit OOM: lowers the pixel budget (images get downscaled ~10%)
+
+# Validation on a T4 is slow, so: fewer/smaller images, fewer steps, less often, no step-0 reference.
+# (Keep these identical across the runs you want to compare.)
+validation:
+  every_n_steps: 500
+  at_start: false
+  num_inference_steps: 20
+  sizes: [[512, 768], [768, 512]]      # [height, width]
+  prompts:
+    - "sltnhsn, a photograph of the Mosque-Madrasa of Sultan Hassan in Cairo, monumental stone facade, midday light"
+    - "sltnhsn, the towering minaret and the main portal in golden hour light"
+  control_prompts:
+    - "a photograph of a historic mosque with a tall minaret in Istanbul"
+
+checkpointing:
+  every_n_steps: 250
+
+logging:
+  tags: [low-vram, nf4]

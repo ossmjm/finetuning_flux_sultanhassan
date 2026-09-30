@@ -68,8 +68,9 @@ def cache_vae_params(vae, dataset: CaptionedImageDataset) -> list[torch.Tensor]:
 
 
 def flow_matching_loss(transformer, latents, prompt_embeds, pooled_embeds, text_ids, scheduler,
-                       fm_cfg, vae_scale_factor: int, device, dtype) -> torch.Tensor:
-    """One rectified-flow training step: x_t = (1 - sigma) * x0 + sigma * noise, target = noise - x0."""
+                       fm_cfg, vae_scale_factor: int, device, dtype) -> tuple[torch.Tensor, float]:
+    """One rectified-flow training step: x_t = (1 - sigma) * x0 + sigma * noise, target = noise - x0.
+    Returns (loss, mean sampled sigma) - the loss depends strongly on the random sigma, see README."""
     bsz, _, h, w = latents.shape
     latents = latents.to(dtype)
 
@@ -113,7 +114,7 @@ def flow_matching_loss(transformer, latents, prompt_embeds, pooled_embeds, text_
     weighting = compute_loss_weighting_for_sd3(weighting_scheme=fm_cfg.weighting_scheme, sigmas=sigmas)
     target = noise - latents
     loss = torch.mean((weighting.float() * (pred.float() - target.float()) ** 2).reshape(bsz, -1), 1)
-    return loss.mean()
+    return loss.mean(), sigmas.float().mean().item()
 
 
 # ----------------------------------------------------------------------------- helpers
@@ -245,7 +246,7 @@ def train(cfg, force: bool = False) -> None:
 
     progress = tqdm(total=t.max_train_steps, disable=not accelerator.is_local_main_process, desc="steps")
     transformer.train()
-    step_loss = 0.0
+    step_loss, step_sigma, loss_ema = 0.0, 0.0, None
     while global_step < t.max_train_steps:
         for batch in dataloader:
             with accelerator.accumulate(transformer):
@@ -256,7 +257,7 @@ def train(cfg, force: bool = False) -> None:
                     params = encode_pixels(vae, batch["pixel_values"])
                 latents = sample_latents(params, vae)
 
-                loss = flow_matching_loss(
+                loss, sigma = flow_matching_loss(
                     transformer, latents,
                     caption_embeds[idx].to(device, dtype), caption_pooled[idx].to(device, dtype),
                     text_ids.to(device, dtype), scheduler, cfg.flow_matching, vae_scale_factor, device, dtype,
@@ -269,19 +270,21 @@ def train(cfg, force: bool = False) -> None:
                 lr_scheduler.step()
                 optimizer.zero_grad()
             step_loss += loss.detach().item() / t.gradient_accumulation_steps
+            step_sigma += sigma / t.gradient_accumulation_steps
 
             if not accelerator.sync_gradients:
                 continue
 
             global_step += 1
             progress.update(1)
-            logs = {"train/loss": step_loss, "train/lr": lr_scheduler.get_last_lr()[0],
+            loss_ema = step_loss if loss_ema is None else 0.98 * loss_ema + 0.02 * step_loss
+            logs = {"train/loss": step_loss, "train/loss_ema": loss_ema, "train/sigma_mean": step_sigma, "train/lr": lr_scheduler.get_last_lr()[0],
                     "train/samples_seen": global_step * t.batch_size * t.gradient_accumulation_steps}
             if grad_norm is not None:
                 logs["train/grad_norm"] = float(grad_norm)
             accelerator.log(logs, step=global_step)
             progress.set_postfix(loss=f"{step_loss:.4f}")
-            step_loss = 0.0
+            step_loss, step_sigma = 0.0, 0.0
 
             if global_step % cfg.checkpointing.every_n_steps == 0 and global_step < t.max_train_steps:
                 save_lora(accelerator, transformer, run_dir / "checkpoints" / f"checkpoint-{global_step}", cfg)
